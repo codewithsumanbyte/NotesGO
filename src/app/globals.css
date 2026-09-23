@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #07130E;
+  --foreground: #F8FAFC;
+  --surface: #10231A;
+  --card: #173125;
+  --primary: #2DD4BF;
+  --accent: #4ADE80;
+  --border: #244134;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: #07130E;
+  color: #F8FAFC;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom Sleek Botanical Forest Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #07130E;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #244134;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2DD4BF80;
+}
+
+/* Glassmorphism styling */
+.glass-surface {
+  background-color: rgba(16, 35, 26, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid #244134;
+}
+
+.glass-card {
+  background-color: rgba(23, 49, 37, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #244134;
+}
+
+/* Touch mobile optimizations */
+@media (max-width: 768px) {
+  button, a {
+    min-height: 40px;
+    touch-action: manipulation;
+  }
+}
