@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import React, { useState, useEffect } from 'react';
+import { Folder } from '@/types/database';
 import { 
-  FolderPlus, 
   X, 
-  Loader2, 
   Palette, 
   Smile, 
-  Check 
+  Loader2, 
+  Check, 
+  Trash2, 
+  Sparkles,
+  Edit2
 } from 'lucide-react';
 import { 
   FOLDER_ICONS, 
@@ -17,35 +19,53 @@ import {
   FolderIconRenderer 
 } from './FolderIconRenderer';
 
-interface NewFolderModalProps {
+interface EditFolderModalProps {
   isOpen: boolean;
+  folder: Folder | null;
   onClose: () => void;
-  currentFolderId: string | null;
-  userId: string;
-  onSuccess: () => void;
+  onSave: (folderId: string, updates: { name: string; color: string; icon: string }) => Promise<void>;
+  onDelete?: (folderId: string) => void;
 }
 
-export function NewFolderModal({
+export function EditFolderModal({
   isOpen,
+  folder,
   onClose,
-  currentFolderId,
-  userId,
-  onSuccess,
-}: NewFolderModalProps) {
+  onSave,
+  onDelete,
+}: EditFolderModalProps) {
   const [name, setName] = useState('');
-  const [selectedColor, setSelectedColor] = useState(FOLDER_PALETTE[0].value);
+  const [selectedColor, setSelectedColor] = useState('#2DD4BF');
   const [selectedIcon, setSelectedIcon] = useState('folder');
   const [iconMode, setIconMode] = useState<'preset' | 'emoji'>('preset');
   const [customEmojiInput, setCustomEmojiInput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const supabase = createClient();
+  // Sync state whenever the target folder changes
+  useEffect(() => {
+    if (folder) {
+      setName(folder.name || '');
+      setSelectedColor(folder.color || '#2DD4BF');
+      const icon = folder.icon || 'folder';
+      setSelectedIcon(icon);
 
-  if (!isOpen) return null;
+      // Check if icon is an emoji or preset
+      const isPreset = FOLDER_ICONS.some((i) => i.id.toLowerCase() === icon.toLowerCase());
+      if (isPreset) {
+        setIconMode('preset');
+        setCustomEmojiInput('');
+      } else {
+        setIconMode('emoji');
+        setCustomEmojiInput(icon);
+      }
+    }
+  }, [folder]);
+
+  if (!isOpen || !folder) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !userId) return;
+    if (!name.trim()) return;
 
     setLoading(true);
     try {
@@ -53,57 +73,14 @@ export function NewFolderModal({
         ? customEmojiInput.trim() 
         : selectedIcon || 'folder';
 
-      // 1. Insert into Supabase
-      const { data, error } = await supabase
-        .from('folders')
-        .insert({
-          user_id: userId,
-          parent_id: currentFolderId,
-          name: name.trim(),
-          color: selectedColor,
-          icon: finalIcon,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        // Fallback without icon if schema doesn't have icon column yet
-        console.warn('Folder insert note:', error.message);
-        const { data: fallbackData } = await supabase
-          .from('folders')
-          .insert({
-            user_id: userId,
-            parent_id: currentFolderId,
-            name: name.trim(),
-            color: selectedColor,
-          })
-          .select()
-          .single();
-
-        if (fallbackData) {
-          try {
-            localStorage.setItem(
-              `notesgo_folder_meta_${fallbackData.id}`, 
-              JSON.stringify({ name: name.trim(), color: selectedColor, icon: finalIcon })
-            );
-          } catch {}
-        }
-      } else if (data) {
-        try {
-          localStorage.setItem(
-            `notesgo_folder_meta_${data.id}`, 
-            JSON.stringify({ name: name.trim(), color: selectedColor, icon: finalIcon })
-          );
-        } catch {}
-      }
-
-      setName('');
-      setSelectedIcon('folder');
-      setCustomEmojiInput('');
-      onSuccess();
+      await onSave(folder.id, {
+        name: name.trim(),
+        color: selectedColor,
+        icon: finalIcon,
+      });
       onClose();
     } catch (err) {
-      console.error('Failed to create folder:', err);
+      console.error('Failed to update folder:', err);
     } finally {
       setLoading(false);
     }
@@ -120,11 +97,11 @@ export function NewFolderModal({
         <div className="px-6 py-4 border-b border-vault-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-vault-primary/10 text-vault-primary border border-vault-primary/20">
-              <FolderPlus className="w-5 h-5" />
+              <Palette className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-heading font-semibold text-base text-vault-text">New Folder</h3>
-              <p className="text-[11px] text-muted-foreground font-mono">Create and customize a new folder</p>
+              <h3 className="font-heading font-semibold text-base text-vault-text">Edit Folder</h3>
+              <p className="text-[11px] text-muted-foreground font-mono">Customize appearance, color & icon</p>
             </div>
           </div>
           <button
@@ -135,7 +112,7 @@ export function NewFolderModal({
           </button>
         </div>
 
-        {/* Form Body */}
+        {/* Scrollable Content Body */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
           {/* Live Preview Card */}
           <div>
@@ -152,7 +129,7 @@ export function NewFolderModal({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-vault-text truncate">
-                  {name.trim() || 'New Folder'}
+                  {name.trim() || 'Untitled Folder'}
                 </p>
                 <p className="text-[11px] font-mono text-muted-foreground">
                   Customized Folder
@@ -166,25 +143,28 @@ export function NewFolderModal({
             <label className="block text-xs font-semibold text-vault-text mb-1.5">
               Folder Name
             </label>
-            <input
-              type="text"
-              required
-              autoFocus
-              placeholder="e.g. Study Notes, Exams 2026, Work"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-vault-card border border-vault-border rounded-xl text-sm text-vault-text focus:outline-none focus:ring-2 focus:ring-vault-primary/40 focus:border-vault-primary transition placeholder:text-muted-foreground/60"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                required
+                placeholder="e.g. Machine Learning, Physics, Work"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-vault-card border border-vault-border rounded-xl text-sm text-vault-text focus:outline-none focus:ring-2 focus:ring-vault-primary/40 focus:border-vault-primary transition"
+              />
+              <Edit2 className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
 
           {/* Color Accent Picker */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-semibold text-vault-text">
-                Color Accent
+                Folder Color Accent
               </label>
               <span className="text-[10px] font-mono text-muted-foreground">{selectedColor}</span>
             </div>
+            
             <div className="flex items-center gap-2 flex-wrap mb-2">
               {FOLDER_PALETTE.map((c) => (
                 <button
@@ -205,7 +185,7 @@ export function NewFolderModal({
                 </button>
               ))}
 
-              {/* Custom Hex Color */}
+              {/* Custom Hex Color Input */}
               <label 
                 className="w-7 h-7 rounded-full border border-vault-border flex items-center justify-center cursor-pointer hover:border-vault-primary transition overflow-hidden relative"
                 title="Choose Custom Color"
@@ -228,7 +208,7 @@ export function NewFolderModal({
                 Folder Icon & Personal Emoji
               </label>
 
-              {/* Toggle Mode */}
+              {/* Toggle Mode: Presets vs Personal Emoji */}
               <div className="flex items-center bg-vault-card border border-vault-border rounded-xl p-0.5 text-xs">
                 <button
                   type="button"
@@ -251,14 +231,14 @@ export function NewFolderModal({
                   }`}
                 >
                   <Smile className="w-3 h-3" />
-                  <span>Emoji</span>
+                  <span>Personal Emoji</span>
                 </button>
               </div>
             </div>
 
-            {/* A. Preset Lucide Icons */}
+            {/* A. Preset Lucide Icons Grid */}
             {iconMode === 'preset' ? (
-              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-44 overflow-y-auto p-1 border border-vault-border rounded-2xl bg-vault-card/50">
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1 border border-vault-border rounded-2xl bg-vault-card/50">
                 {FOLDER_ICONS.map((item) => {
                   const Icon = item.icon;
                   const isSelected = selectedIcon === item.id;
@@ -281,7 +261,7 @@ export function NewFolderModal({
                 })}
               </div>
             ) : (
-              /* B. Personal Emoji Input */
+              /* B. Personal Emoji & Custom Character Input */
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <div className="w-10 h-10 rounded-xl bg-vault-card border border-vault-border flex items-center justify-center text-xl shrink-0">
@@ -323,22 +303,41 @@ export function NewFolderModal({
           </div>
 
           {/* Footer Actions */}
-          <div className="pt-2 border-t border-vault-border/60 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:text-vault-text rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !name.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 bg-vault-primary hover:bg-vault-primary/90 text-vault-bg text-xs font-bold rounded-xl shadow-md shadow-vault-primary/20 transition disabled:opacity-60"
-            >
-              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>Create Folder</span>
-            </button>
+          <div className="pt-2 border-t border-vault-border/60 flex items-center justify-between">
+            {onDelete ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Delete folder "${folder.name}"?`)) {
+                    onDelete(folder.id);
+                    onClose();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition"
+                title="Delete Folder"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-semibold text-muted-foreground hover:text-vault-text rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !name.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 bg-vault-primary hover:bg-vault-primary/90 text-vault-bg text-xs font-bold rounded-xl shadow-md shadow-vault-primary/20 transition disabled:opacity-60"
+              >
+                {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Save Changes</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

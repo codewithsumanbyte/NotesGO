@@ -384,43 +384,90 @@ export function LandingPage({ onOpenAuth, onExploreDemo }: LandingPageProps) {
         </div>
       </section>
 
-      {/* Bottom CTA Banner */}
+      {/* Bottom CTA Banner with Exams Preparation Animation */}
       <section className="relative z-10 py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-r from-vault-card via-vault-surface to-vault-card border border-vault-border shadow-2xl relative overflow-hidden">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-vault-primary mb-2">
-                JOIN THOUSANDS OF USERS
-              </p>
-              <h2 className="font-heading font-semibold text-2xl sm:text-4xl text-vault-text mb-4">
-                Your Files Deserve a Better Home
+        <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-br from-vault-card via-vault-surface to-vault-card border border-vault-border shadow-2xl relative overflow-hidden">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+            {/* Left Column: Headline & Action */}
+            <div className="lg:col-span-7">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-vault-primary/10 border border-vault-primary/20 text-[11px] font-semibold text-vault-primary mb-3">
+                <Sparkles className="w-3.5 h-3.5 text-vault-accent" />
+                <span>STUDY & EXAMS READY</span>
+              </div>
+              <h2 className="font-heading font-semibold text-2xl sm:text-4xl text-vault-text mb-4 leading-tight">
+                Prepare for Your Exams with Complete Clarity
               </h2>
-              <p className="text-xs sm:text-sm text-muted-foreground mb-6 max-w-md">
-                Stop searching. Start living. NotesGO keeps your important files safe, organized and always within reach.
+              <p className="text-xs sm:text-sm text-muted-foreground mb-6 max-w-lg leading-relaxed">
+                NotesGO is built for students, exam candidates, and researchers. Annotate revision PDFs, organize subject vaults, and sketch mind maps on full-screen study whiteboards — with zero distractions.
               </p>
-              <button
-                onClick={onOpenAuth}
-                className="px-6 py-3 bg-vault-primary hover:bg-vault-primary/90 text-vault-bg font-bold text-xs sm:text-sm rounded-xl shadow-xl shadow-vault-primary/25 transition active:scale-95"
-              >
-                Get Started Free →
-              </button>
+
+              <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+                <button
+                  onClick={onOpenAuth}
+                  className="px-6 py-3.5 bg-vault-primary hover:bg-vault-primary/90 text-vault-bg font-bold text-xs sm:text-sm rounded-xl shadow-xl shadow-vault-primary/25 transition active:scale-95 flex items-center gap-2"
+                >
+                  <span>Start Free Exam Prep</span>
+                  <ArrowRight className="w-4 h-4 stroke-[2.5]" />
+                </button>
+                <button
+                  onClick={onExploreDemo}
+                  className="px-5 py-3.5 bg-vault-card hover:bg-vault-card/80 text-vault-text font-semibold text-xs sm:text-sm rounded-xl border border-vault-border shadow-sm transition active:scale-95"
+                >
+                  Explore Workspace
+                </button>
+              </div>
+
+              {/* Feature Badges below CTAs */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8 pt-6 border-t border-vault-border/50 text-left">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-vault-primary/10 text-vault-primary flex items-center justify-center shrink-0">
+                    <FileText className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-vault-text">PDF Annotator</p>
+                    <p className="text-[10px] text-muted-foreground">Highlight & ink</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-vault-accent/10 text-vault-accent flex items-center justify-center shrink-0">
+                    <PenTool className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-vault-text">Study Whiteboard</p>
+                    <p className="text-[10px] text-muted-foreground">Math grid & shapes</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-vault-text">100% Free</p>
+                    <p className="text-[10px] text-muted-foreground">Auto-saved securely</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="p-3 sm:p-4 rounded-2xl bg-vault-surface/60 border border-vault-border">
-                <FolderKanban className="w-5 h-5 text-vault-primary mx-auto mb-2" />
-                <p className="text-xs font-bold text-vault-text">Organize</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Everything in one place</p>
+            {/* Right Column: Exams Preparation Animation (Occupies the right-bottom free space cleanly without overlapping!) */}
+            <div className="lg:col-span-5 flex flex-col items-center justify-center relative">
+              <div className="absolute inset-0 bg-vault-primary/10 rounded-full blur-3xl pointer-events-none" />
+              
+              <div className="relative w-full max-w-[320px] sm:max-w-[400px] aspect-square flex items-center justify-center p-2">
+                <img
+                  src="/exams-prep.svg"
+                  alt="NotesGO Exam Preparation Animation"
+                  className="w-full h-full object-contain drop-shadow-2xl select-none"
+                  loading="lazy"
+                />
               </div>
-              <div className="p-3 sm:p-4 rounded-2xl bg-vault-surface/60 border border-vault-border">
-                <Smartphone className="w-5 h-5 text-vault-accent mx-auto mb-2" />
-                <p className="text-xs font-bold text-vault-text">Access</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Any device, anywhere</p>
-              </div>
-              <div className="p-3 sm:p-4 rounded-2xl bg-vault-surface/60 border border-vault-border">
-                <Sparkles className="w-5 h-5 text-vault-primary mx-auto mb-2" />
-                <p className="text-xs font-bold text-vault-text">Productive</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Focus on what matters</p>
+
+              {/* Floating Status Pill */}
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-vault-surface/90 border border-vault-border text-[11px] font-mono text-vault-primary shadow-lg -mt-2 relative z-10 backdrop-blur-md">
+                <span className="w-2 h-2 rounded-full bg-vault-accent animate-pulse" />
+                <span>Active Revision Session</span>
               </div>
             </div>
           </div>

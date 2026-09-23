@@ -2,14 +2,14 @@
 
 import React, { useState } from 'react';
 import { 
-  Folder as FolderIcon, 
   MoreVertical, 
   Trash2, 
   Star, 
-  Edit3, 
-  FolderOpen
+  FolderOpen,
+  Palette
 } from 'lucide-react';
 import { Folder } from '@/types/database';
+import { FolderIconRenderer } from './FolderIconRenderer';
 
 interface FolderGridProps {
   folders: Folder[];
@@ -17,7 +17,8 @@ interface FolderGridProps {
   onOpenFolder: (folderId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onToggleFavorite: (folder: Folder) => void;
-  onRenameFolder: (folder: Folder) => void;
+  onRenameFolder?: (folder: Folder) => void;
+  onEditFolder: (folder: Folder) => void;
 }
 
 export function FolderGrid({
@@ -27,6 +28,7 @@ export function FolderGrid({
   onDeleteFolder,
   onToggleFavorite,
   onRenameFolder,
+  onEditFolder,
 }: FolderGridProps) {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
@@ -56,82 +58,106 @@ export function FolderGrid({
                 onClick={() => onOpenFolder(folder.id)}
               >
                 <div 
-                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
+                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 shadow-sm"
                   style={{ 
                     backgroundColor: `${folder.color || '#2DD4BF'}20`, 
                     color: folder.color || '#2DD4BF' 
                   }}
                 >
-                  <FolderIcon className="w-5 h-5 fill-current" />
+                  <FolderIconRenderer icon={folder.icon} className="w-5 h-5 fill-current" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-vault-text truncate group-hover:text-vault-primary transition-colors">
                     {folder.name}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">Folder</p>
+                  <p className="text-[10px] text-muted-foreground font-mono">
+                    {folder.file_count !== undefined ? `${folder.file_count} items` : 'Folder'}
+                  </p>
                 </div>
               </div>
 
-              {/* Action Dropdown Menu */}
-              <div className="relative">
+              {/* Action Buttons: Direct Edit on Hover + Dropdown Menu */}
+              <div className="flex items-center gap-0.5">
+                {/* Quick Edit Button (Desktop hover) */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setActiveMenuId(isMenuOpen ? null : folder.id);
+                    onEditFolder(folder);
                   }}
-                  className="opacity-100 sm:opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-vault-text rounded-lg transition-opacity"
+                  title="Edit Folder Color, Name & Icon"
+                  className="hidden sm:inline-flex opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-vault-primary hover:bg-vault-surface rounded-lg transition-opacity"
                 >
-                  <MoreVertical className="w-3.5 h-3.5" />
+                  <Palette className="w-3.5 h-3.5" />
                 </button>
 
-                {isMenuOpen && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-30" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveMenuId(null);
-                      }} 
-                    />
-                    <div className="absolute right-0 top-full mt-1 w-36 bg-vault-surface border border-vault-border rounded-xl shadow-xl z-40 py-1 text-xs">
-                      <button
+                {/* Dropdown Menu Toggle */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveMenuId(isMenuOpen ? null : folder.id);
+                    }}
+                    className="opacity-100 sm:opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-vault-text rounded-lg transition-opacity"
+                  >
+                    <MoreVertical className="w-3.5 h-3.5" />
+                  </button>
+
+                  {isMenuOpen && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-30" 
                         onClick={(e) => {
                           e.stopPropagation();
                           setActiveMenuId(null);
-                          onToggleFavorite(folder);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-muted-foreground hover:text-vault-text hover:bg-vault-card transition"
-                      >
-                        <Star className={`w-3.5 h-3.5 ${folder.is_favorite ? 'text-amber-400 fill-amber-400' : ''}`} />
-                        <span>{folder.is_favorite ? 'Unfavorite' : 'Favorite'}</span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuId(null);
-                          onRenameFolder(folder);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-muted-foreground hover:text-vault-text hover:bg-vault-card transition"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Rename</span>
-                      </button>
-                      <div className="h-[1px] bg-vault-border my-1" />
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuId(null);
-                          onDeleteFolder(folder.id);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-destructive hover:bg-destructive/10 transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Move to Trash</span>
-                      </button>
-                    </div>
-                  </>
-                )}
+                        }} 
+                      />
+                      <div className="absolute right-0 top-full mt-1 w-40 bg-vault-surface border border-vault-border rounded-xl shadow-xl z-40 py-1 text-xs animate-in fade-in zoom-in-95 duration-100">
+                        {/* Edit Folder Option */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                            onEditFolder(folder);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-vault-text hover:bg-vault-card transition font-medium"
+                        >
+                          <Palette className="w-3.5 h-3.5 text-vault-primary" />
+                          <span>Edit Folder</span>
+                        </button>
+
+                        {/* Favorite */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                            onToggleFavorite(folder);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-muted-foreground hover:text-vault-text hover:bg-vault-card transition"
+                        >
+                          <Star className={`w-3.5 h-3.5 ${folder.is_favorite ? 'text-amber-400 fill-amber-400' : ''}`} />
+                          <span>{folder.is_favorite ? 'Unfavorite' : 'Favorite'}</span>
+                        </button>
+
+                        <div className="h-[1px] bg-vault-border my-1" />
+
+                        {/* Delete */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                            onDeleteFolder(folder.id);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-destructive hover:bg-destructive/10 transition"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Move to Trash</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           );

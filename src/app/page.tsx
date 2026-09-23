@@ -12,6 +12,7 @@ import { FileList } from '@/components/vault/FileList';
 import { UploadDropzone } from '@/components/vault/UploadDropzone';
 import { FilePreviewModal } from '@/components/vault/FilePreviewModal';
 import { NewFolderModal } from '@/components/vault/NewFolderModal';
+import { EditFolderModal } from '@/components/vault/EditFolderModal';
 import { NoteEditorModal } from '@/components/notes/NoteEditorModal';
 import { WhiteboardModal } from '@/components/whiteboard/WhiteboardModal';
 import { PdfEditorStudio } from '@/components/pdf/PdfEditorStudio';
@@ -60,6 +61,8 @@ export default function Home() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
+  const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
+  const [isEditFolderOpen, setIsEditFolderOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [activePdfFile, setActivePdfFile] = useState<FileItem | null>(null);
   const [activeNote, setActiveNote] = useState<NoteItem | null>(null);
@@ -149,7 +152,24 @@ export default function Home() {
           whiteboardsQuery,
         ]);
 
-        setFolders(foldersRes.data || []);
+        const rawFolders: Folder[] = foldersRes.data || [];
+        const enrichedFolders = rawFolders.map((f: Folder) => {
+          try {
+            const cached = localStorage.getItem(`notesgo_folder_meta_${f.id}`);
+            if (cached) {
+              const meta = JSON.parse(cached);
+              return {
+                ...f,
+                name: f.name || meta.name,
+                color: f.color || meta.color,
+                icon: f.icon || meta.icon,
+              };
+            }
+          } catch {}
+          return f;
+        });
+
+        setFolders(enrichedFolders);
         setFiles(filesRes.data || []);
         setNotes(notesRes.data || []);
         setWhiteboards(whiteboardsRes.data || []);
@@ -219,6 +239,48 @@ export default function Home() {
       .from('folders')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', folderId);
+    loadVaultData();
+  };
+
+  // Edit / Update folder properties (name, color, icon)
+  const handleUpdateFolder = async (folderId: string, updates: { name: string; color: string; icon: string }) => {
+    // 1. Cache metadata locally so custom icon/color persists immediately
+    try {
+      localStorage.setItem(`notesgo_folder_meta_${folderId}`, JSON.stringify(updates));
+    } catch {}
+
+    // 2. Persist to Supabase
+    try {
+      const { error } = await supabase
+        .from('folders')
+        .update({
+          name: updates.name.trim(),
+          color: updates.color,
+          icon: updates.icon,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', folderId);
+
+      if (error) {
+        // Fallback update without icon column if schema doesn't have icon column yet
+        console.warn('Folder update note:', error.message);
+        await supabase
+          .from('folders')
+          .update({
+            name: updates.name.trim(),
+            color: updates.color,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', folderId);
+      }
+    } catch (err) {
+      console.error('Failed to update folder in database:', err);
+    }
+
+    // 3. Update local state immediately
+    setFolders((prev) =>
+      prev.map((f) => (f.id === folderId ? { ...f, ...updates, updated_at: new Date().toISOString() } : f))
+    );
     loadVaultData();
   };
 
@@ -549,7 +611,10 @@ export default function Home() {
                 onOpenFolder={handleOpenFolder}
                 onDeleteFolder={handleDeleteFolder}
                 onToggleFavorite={handleToggleFavoriteFolder}
-                onRenameFolder={(f) => console.log('Rename', f)}
+                onEditFolder={(f) => {
+                  setEditingFolder(f);
+                  setIsEditFolderOpen(true);
+                }}
               />
 
               {viewMode === 'grid' ? (
@@ -664,8 +729,19 @@ export default function Home() {
             isOpen={isNewFolderOpen}
             onClose={() => setIsNewFolderOpen(false)}
             currentFolderId={currentFolderId}
-            userId={user.id}
+            userId={user?.id || 'demo-user-id'}
             onSuccess={loadVaultData}
+          />
+
+          <EditFolderModal
+            isOpen={isEditFolderOpen}
+            folder={editingFolder}
+            onClose={() => {
+              setIsEditFolderOpen(false);
+              setEditingFolder(null);
+            }}
+            onSave={handleUpdateFolder}
+            onDelete={handleDeleteFolder}
           />
 
           <NoteEditorModal

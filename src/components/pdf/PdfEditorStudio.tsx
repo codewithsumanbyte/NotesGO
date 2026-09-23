@@ -134,9 +134,6 @@ export function PdfEditorStudio({
   const [showColorPickerMobile, setShowColorPickerMobile] = useState(false);
   const [showStrokeSliderMobile, setShowStrokeSliderMobile] = useState(false);
 
-  // Swipe page flip indicator
-  const [swipeHint, setSwipeHint] = useState<'next' | 'prev' | null>(null);
-
   // Annotations Ground Truth (PageNumber -> Data)
   const [annotations, setAnnotations] = useState<Record<number, PageAnnotationData>>({});
   const annotationsRef = useRef<Record<number, PageAnnotationData>>({});
@@ -175,6 +172,7 @@ export function PdfEditorStudio({
   const pinchStartScaleRef = useRef<number>(1.2);
   const isDraggingSelectedItemRef = useRef(false);
   const dragStartNormCoordsRef = useRef<{ x: number; y: number } | null>(null);
+  const loadedFileIdRef = useRef<string | null>(null);
 
   const supabase = createClient();
 
@@ -206,7 +204,14 @@ export function PdfEditorStudio({
 
   // 2. Fetch and Load PDF Document Binary and Annotations
   useEffect(() => {
-    if (!isOpen || !pdfLibLoaded || !file) return;
+    if (!isOpen) {
+      loadedFileIdRef.current = null;
+      return;
+    }
+    if (!pdfLibLoaded || !file?.id) return;
+    // Guard against repeated reload when file object updates on auto-save
+    if (loadedFileIdRef.current === file.id) return;
+    loadedFileIdRef.current = file.id;
 
     let isMounted = true;
     setLoading(true);
@@ -293,7 +298,7 @@ export function PdfEditorStudio({
       isMounted = false;
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [isOpen, pdfLibLoaded, file, userId, supabase]);
+  }, [isOpen, pdfLibLoaded, file?.id, userId, supabase]);
 
   // 3. Render Current Page
   const renderCurrentPage = useCallback(async () => {
@@ -591,6 +596,75 @@ export function PdfEditorStudio({
     markChangesMade();
   };
 
+  // Page Turn & Navigation Helpers
+  const goToNextPage = () => {
+    if (currentPage < numPages && !renderingPage) {
+      const nextP = currentPage + 1;
+      setCurrentPage(nextP);
+      setJumpPageInput(String(nextP));
+      setSelectedItem(null);
+      if (containerRef.current) {
+        containerRef.current.scrollTop = 0;
+        containerRef.current.scrollLeft = 0;
+      }
+    }
+  };
+
+  const goToPrevPage = () => {
+    if (currentPage > 1 && !renderingPage) {
+      const prevP = currentPage - 1;
+      setCurrentPage(prevP);
+      setJumpPageInput(String(prevP));
+      setSelectedItem(null);
+      if (containerRef.current) {
+        containerRef.current.scrollTop = 0;
+        containerRef.current.scrollLeft = 0;
+      }
+    }
+  };
+
+  // Zoom step with center-point preservation so view does not snap to corner
+  const handleZoomStep = (delta: number) => {
+    const container = containerRef.current;
+    const oldScale = scale;
+    const newScale = Math.max(0.5, Math.min(3.0, Number((oldScale + delta).toFixed(2))));
+    if (newScale === oldScale) return;
+
+    if (!container) {
+      setScale(newScale);
+      return;
+    }
+
+    const centerX = container.clientWidth / 2;
+    const centerY = container.clientHeight / 2;
+    const scrollX = container.scrollLeft;
+    const scrollY = container.scrollTop;
+
+    const ratio = newScale / oldScale;
+    const newScrollLeft = (scrollX + centerX) * ratio - centerX;
+    const newScrollTop = (scrollY + centerY) * ratio - centerY;
+
+    setScale(newScale);
+    requestAnimationFrame(() => {
+      if (containerRef.current) {
+        containerRef.current.scrollLeft = Math.max(0, newScrollLeft);
+        containerRef.current.scrollTop = Math.max(0, newScrollTop);
+      }
+    });
+  };
+
+  // Fit to screen width helper with reset to left margin
+  const handleFitToWidth = () => {
+    const container = containerRef.current;
+    const availableWidth = container?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 400);
+    const padding = (typeof window !== 'undefined' && window.innerWidth < 768) ? 16 : 48;
+    const targetScale = Math.max(0.5, Math.min(2.5, (availableWidth - padding) / (naturalPageDimensions.width || 600)));
+    setScale(Number(targetScale.toFixed(2)));
+    if (container) {
+      container.scrollLeft = 0;
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // INTERACTION ENGINE: 60FPS GPU TOUCH ENGINE WITH SLIDE & PINCH-ZOOM
   // ---------------------------------------------------------------------------
@@ -829,7 +903,6 @@ export function PdfEditorStudio({
           scrollTop: containerRef.current?.scrollTop || 0,
           time: Date.now(),
         };
-        setSwipeHint(null);
         return;
       }
 
@@ -931,7 +1004,7 @@ export function PdfEditorStudio({
     if (e.touches.length === 1) {
       const touch = e.touches[0];
 
-      // Hand tool: Pan & slide page left/right
+      // Hand tool: Pan & slide page left/right freely (gesture page flip disabled per user preference)
       if (activeTool === 'hand' && touchStartRef.current && containerRef.current) {
         e.preventDefault();
         const dx = touch.clientX - touchStartRef.current.x;
@@ -939,15 +1012,6 @@ export function PdfEditorStudio({
 
         containerRef.current.scrollLeft = touchStartRef.current.scrollLeft - dx;
         containerRef.current.scrollTop = touchStartRef.current.scrollTop - dy;
-
-        // Detect horizontal swipe page flip when sliding near edges
-        if (dx < -110 && currentPage < numPages) {
-          setSwipeHint('next');
-        } else if (dx > 110 && currentPage > 1) {
-          setSwipeHint('prev');
-        } else {
-          setSwipeHint(null);
-        }
         return;
       }
 
@@ -1030,32 +1094,48 @@ export function PdfEditorStudio({
   };
 
   const handleTouchEnd = () => {
-    // 1. Commit pinch zoom on release
+    // 1. Commit pinch zoom & 2-finger pan on release without snapping to corner
     if (pinchStartDistanceRef.current !== null && stageWrapperRef.current) {
       const currentTransform = stageWrapperRef.current.style.transform;
       stageWrapperRef.current.style.transform = 'none';
 
-      // Parse scale from transform
-      const match = currentTransform.match(/scale\(([^)]+)\)/);
-      if (match && match[1]) {
-        const ratio = parseFloat(match[1]);
-        if (!isNaN(ratio) && ratio !== 1) {
-          const finalScale = Math.max(0.6, Math.min(3.0, Number((pinchStartScaleRef.current * ratio).toFixed(2))));
+      // Parse scale and translate from transform
+      const matchScale = currentTransform.match(/scale\(([^)]+)\)/);
+      const matchTranslate = currentTransform.match(/translate3d\(([^p]+)px,\s*([^p]+)px/);
+
+      const ratio = matchScale && matchScale[1] ? parseFloat(matchScale[1]) : 1;
+      const transX = matchTranslate && matchTranslate[1] ? parseFloat(matchTranslate[1]) : 0;
+      const transY = matchTranslate && matchTranslate[2] ? parseFloat(matchTranslate[2]) : 0;
+
+      const container = containerRef.current;
+      if (container && touchStartRef.current) {
+        const startScrollLeft = touchStartRef.current.scrollLeft;
+        const startScrollTop = touchStartRef.current.scrollTop;
+
+        if (!isNaN(ratio) && Math.abs(ratio - 1) > 0.04) {
+          const finalScale = Math.max(0.5, Math.min(3.0, Number((pinchStartScaleRef.current * ratio).toFixed(2))));
+          const originX = touchStartRef.current.x - container.getBoundingClientRect().left;
+          const originY = touchStartRef.current.y - container.getBoundingClientRect().top;
+          const scaleMult = finalScale / pinchStartScaleRef.current;
+
+          const targetScrollLeft = (startScrollLeft + originX) * scaleMult - originX - transX;
+          const targetScrollTop = (startScrollTop + originY) * scaleMult - originY - transY;
+
           setScale(finalScale);
+          requestAnimationFrame(() => {
+            if (containerRef.current) {
+              containerRef.current.scrollLeft = Math.max(0, targetScrollLeft);
+              containerRef.current.scrollTop = Math.max(0, targetScrollTop);
+            }
+          });
+        } else {
+          // Pure two-finger pan
+          container.scrollLeft = Math.max(0, startScrollLeft - transX);
+          container.scrollTop = Math.max(0, startScrollTop - transY);
         }
       }
     }
     pinchStartDistanceRef.current = null;
-
-    // 2. Commit swipe page flip if user slid far enough
-    if (swipeHint === 'next' && currentPage < numPages) {
-      setCurrentPage((p) => p + 1);
-      setJumpPageInput(String(currentPage + 1));
-    } else if (swipeHint === 'prev' && currentPage > 1) {
-      setCurrentPage((p) => p - 1);
-      setJumpPageInput(String(currentPage - 1));
-    }
-    setSwipeHint(null);
     touchStartRef.current = null;
 
     if (isDraggingSelectedItemRef.current) {
@@ -1316,14 +1396,6 @@ export function PdfEditorStudio({
     }
   };
 
-  // Fit to screen width helper
-  const handleFitToWidth = () => {
-    const availableWidth = containerRef.current?.clientWidth || window.innerWidth || 400;
-    const padding = window.innerWidth < 768 ? 20 : 64;
-    const targetScale = Math.max(0.6, Math.min(2.5, (availableWidth - padding) / naturalPageDimensions.width));
-    setScale(Number(targetScale.toFixed(2)));
-  };
-
   if (!isOpen) return null;
 
   const currentPageNotes = annotations[currentPage] || { strokes: [], textNotes: [], stickyNotes: [] };
@@ -1344,67 +1416,45 @@ export function PdfEditorStudio({
         </div>
       )}
 
-      {/* Swipe Page Flip Indicator */}
-      {swipeHint && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 bg-vault-surface/95 border border-vault-primary text-vault-primary rounded-2xl shadow-2xl flex items-center gap-2 text-xs font-bold animate-pulse backdrop-blur-md">
-          {swipeHint === 'next' ? (
-            <>
-              <span>Release to go to Page {currentPage + 1}</span>
-              <ArrowRight className="w-4 h-4" />
-            </>
-          ) : (
-            <>
-              <ArrowLeft className="w-4 h-4" />
-              <span>Release to go to Page {currentPage - 1}</span>
-            </>
-          )}
-        </div>
-      )}
-
       {/* Top Header Bar */}
-      <header className="h-14 sm:h-16 px-2.5 sm:px-6 bg-vault-surface border-b border-vault-border flex items-center justify-between shrink-0 z-20">
+      <header className="h-14 sm:h-16 px-3 sm:px-6 bg-vault-surface/90 backdrop-blur-xl border-b border-vault-border/80 flex items-center justify-between shrink-0 z-30">
         {/* Left: Back & Document Title */}
-        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 pr-1">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 pr-1">
           <button
             onClick={handleSafeClose}
-            className="flex items-center gap-1 p-2 sm:px-3 sm:py-1.5 bg-vault-card hover:bg-vault-card/80 text-vault-text text-xs font-semibold rounded-xl border border-vault-border transition shrink-0 active:scale-95"
+            className="flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 bg-vault-card/80 hover:bg-vault-card text-vault-text rounded-xl border border-vault-border transition shrink-0 active:scale-95 shadow-sm"
             title="Save & Return to Vault"
           >
             <ArrowLeft className="w-4 h-4 text-vault-primary" />
-            <span className="hidden md:inline">Back to Vault</span>
+            <span className="hidden md:inline text-xs font-semibold">Back</span>
           </button>
 
-          <div className="min-w-0">
-            <h2 className="font-heading font-semibold text-xs sm:text-sm text-vault-text truncate max-w-[100px] sm:max-w-xs md:max-w-md">
+          <div className="min-w-0 flex flex-col justify-center">
+            <h2 className="font-heading font-semibold text-xs sm:text-sm text-vault-text truncate max-w-[120px] xs:max-w-[170px] sm:max-w-xs md:max-w-md">
               {file.name}
             </h2>
-            <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] text-muted-foreground font-mono">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono mt-0.5">
               {isSavingToFile ? (
                 <span className="text-vault-primary flex items-center gap-1 font-bold">
                   <Loader2 className="w-2.5 h-2.5 animate-spin" /> Saving...
                 </span>
               ) : hasUnsavedChanges ? (
                 <span className="text-amber-400 flex items-center gap-1">
-                  ● Unsaved changes
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Unsaved
                 </span>
               ) : (
                 <span className="text-vault-accent flex items-center gap-1">
-                  <CheckCircle2 className="w-2.5 h-2.5" /> Saved {lastSavedTime ? `at ${lastSavedTime}` : ''}
+                  <span className="w-1.5 h-1.5 rounded-full bg-vault-accent" /> Saved
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Center: Page Stepper */}
-        <div className="flex items-center bg-vault-card border border-vault-border rounded-xl p-0.5 text-xs shrink-0">
+        {/* Center: Page Stepper (Desktop only - mobile uses dedicated corner buttons!) */}
+        <div className="hidden md:flex items-center bg-vault-card border border-vault-border rounded-xl p-0.5 text-xs shrink-0">
           <button
-            onClick={() => {
-              const nextP = Math.max(1, currentPage - 1);
-              setCurrentPage(nextP);
-              setJumpPageInput(String(nextP));
-              setSelectedItem(null);
-            }}
+            onClick={goToPrevPage}
             disabled={currentPage <= 1 || renderingPage}
             className="p-1 sm:p-1.5 text-muted-foreground hover:text-vault-text disabled:opacity-30 rounded-lg transition"
             title="Previous Page"
@@ -1424,12 +1474,7 @@ export function PdfEditorStudio({
           </form>
 
           <button
-            onClick={() => {
-              const nextP = Math.min(numPages, currentPage + 1);
-              setCurrentPage(nextP);
-              setJumpPageInput(String(nextP));
-              setSelectedItem(null);
-            }}
+            onClick={goToNextPage}
             disabled={currentPage >= numPages || renderingPage}
             className="p-1 sm:p-1.5 text-muted-foreground hover:text-vault-text disabled:opacity-30 rounded-lg transition"
             title="Next Page"
@@ -1439,60 +1484,63 @@ export function PdfEditorStudio({
         </div>
 
         {/* Right: Actions Bar */}
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Annotations List Drawer Toggle */}
           <button
             onClick={() => setIsAnnotationsDrawerOpen(true)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition ${
+            className={`hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition ${
               totalPageAnnotations > 0
                 ? 'bg-vault-card border-vault-primary/40 text-vault-primary'
                 : 'bg-vault-card/60 border-vault-border text-muted-foreground hover:text-vault-text'
             }`}
-            title="Manage Page Annotations (Edit & Delete)"
+            title="Manage Page Annotations"
           >
             <Layers className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Page Items</span>
+            <span className="hidden md:inline">Items</span>
             <span className="px-1.5 py-0.2 bg-vault-primary/20 text-vault-primary rounded-full text-[10px] font-mono font-bold">
               {totalPageAnnotations}
             </span>
           </button>
 
-          {/* Undo / Redo */}
-          <button
-            onClick={handleUndo}
-            title="Undo"
-            className="p-1.5 sm:p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-card border border-vault-border rounded-xl transition"
-          >
-            <Undo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </button>
-          <button
-            onClick={handleRedo}
-            title="Redo"
-            className="p-1.5 sm:p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-card border border-vault-border rounded-xl transition"
-          >
-            <Redo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </button>
+          {/* Compact Undo / Redo Group */}
+          <div className="flex items-center bg-vault-card/80 border border-vault-border rounded-xl p-0.5 shrink-0 shadow-sm">
+            <button
+              onClick={handleUndo}
+              title="Undo"
+              className="p-1.5 sm:p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-surface rounded-lg transition active:scale-95"
+            >
+              <Undo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+            <div className="w-[1px] h-3 bg-vault-border" />
+            <button
+              onClick={handleRedo}
+              title="Redo"
+              className="p-1.5 sm:p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-surface rounded-lg transition active:scale-95"
+            >
+              <Redo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+          </div>
 
-          {/* Direct Download Button */}
+          {/* Direct Download Button (Desktop only) */}
           <button
             onClick={handleDownloadBakedPdf}
             title="Download PDF with All Changes Baked In"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-vault-card hover:bg-vault-card/80 text-vault-text text-xs font-semibold rounded-xl border border-vault-border transition"
+            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 bg-vault-card hover:bg-vault-card/80 text-vault-text text-xs font-semibold rounded-xl border border-vault-border transition shadow-sm"
           >
             <Download className="w-3.5 h-3.5 text-vault-primary" />
             <span>Download</span>
           </button>
 
-          {/* PROMINENT SAVE CHANGES BUTTON */}
+          {/* Save Button */}
           <button
             onClick={() => savePermanentlyIntoPdfFile(true)}
             disabled={isSavingToFile}
-            className={`flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-bold rounded-xl shadow-lg transition active:scale-95 disabled:opacity-60 ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs font-bold rounded-xl shadow-md transition active:scale-95 disabled:opacity-60 shrink-0 ${
               hasUnsavedChanges
                 ? 'bg-vault-primary hover:bg-vault-primary/90 text-vault-bg shadow-vault-primary/25 animate-pulse'
                 : 'bg-vault-card hover:bg-vault-card/90 text-vault-text border border-vault-border'
             }`}
-            title="Permanently Save Edits into PDF File in Vault"
+            title="Permanently Save Edits into PDF File"
           >
             {isSavingToFile ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1502,7 +1550,7 @@ export function PdfEditorStudio({
               <FileCheck className="w-3.5 h-3.5 text-vault-accent stroke-[2.5]" />
             )}
             <span className="hidden xs:inline">
-              {isSavingToFile ? 'Saving...' : hasUnsavedChanges ? 'Save Changes' : 'Saved'}
+              {isSavingToFile ? 'Saving...' : hasUnsavedChanges ? 'Save' : 'Saved'}
             </span>
           </button>
         </div>
@@ -1691,8 +1739,9 @@ export function PdfEditorStudio({
       {/* Main Document Viewport Stage */}
       <div 
         ref={containerRef}
-        className="flex-1 bg-vault-bg overflow-auto p-2 sm:p-6 pb-24 md:pb-6 flex items-start relative touch-pan-x touch-pan-y overscroll-contain"
+        className="flex-1 bg-vault-bg overflow-auto relative touch-pan-x touch-pan-y overscroll-contain select-none"
         style={{
+          WebkitOverflowScrolling: 'touch',
           cursor: activeTool === 'hand' ? 'grab' : activeTool === 'select' ? 'default' : activeTool === 'eraser' ? 'cell' : 'crosshair',
         }}
       >
@@ -1727,15 +1776,17 @@ export function PdfEditorStudio({
             </button>
           </div>
         ) : (
-          /* GPU-Accelerated Hardware Transform Stage Wrapper (Centers with margin: auto so horizontal pan has 0 clipping!) */
-          <div 
-            ref={stageWrapperRef}
-            className="relative shadow-2xl rounded-lg overflow-hidden border border-vault-border bg-white m-auto will-change-transform"
-            style={{
-              width: naturalPageDimensions.width * scale,
-              height: naturalPageDimensions.height * scale,
-            }}
-          >
+          /* Stage Centering Container: min-w-full and min-h-full inline-flex centers when smaller, allows full 2D scroll when larger with NO clipping! */
+          <div className="min-w-full min-h-full inline-flex items-center justify-center p-2 sm:p-6 pb-44 md:pb-12 box-border">
+            {/* GPU-Accelerated Hardware Transform Stage Wrapper */}
+            <div 
+              ref={stageWrapperRef}
+              className="relative shadow-2xl rounded-lg overflow-hidden border border-vault-border bg-white shrink-0 will-change-transform"
+              style={{
+                width: naturalPageDimensions.width * scale,
+                height: naturalPageDimensions.height * scale,
+              }}
+            >
             {/* 1. Base Layer: High-Resolution Native PDF Canvas */}
             <canvas 
               ref={pdfCanvasRef} 
@@ -1919,44 +1970,75 @@ export function PdfEditorStudio({
               );
             })}
           </div>
-        )}
-
-        {/* FLOATING MOBILE ZOOM CONTROLS (ALWAYS VISIBLE) */}
-        <div className="fixed bottom-20 md:bottom-6 right-3 sm:right-6 z-30 flex items-center bg-vault-surface/95 backdrop-blur-xl border border-vault-border rounded-2xl shadow-2xl p-1 gap-1">
-          <button
-            onClick={() => setScale((s) => Math.max(0.6, Number((s - 0.2).toFixed(2))))}
-            className="p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-card rounded-xl transition active:scale-95"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={handleFitToWidth}
-            className="px-2 py-1 text-[11px] font-mono font-bold text-vault-primary hover:bg-vault-card rounded-xl transition"
-            title="Fit to Screen Width"
-          >
-            {Math.round(scale * 100)}%
-          </button>
-
-          <button
-            onClick={() => setScale((s) => Math.min(3.0, Number((s + 0.2).toFixed(2))))}
-            className="p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-card rounded-xl transition active:scale-95"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-
-          <div className="w-[1px] h-4 bg-vault-border mx-0.5" />
-
-          <button
-            onClick={handleFitToWidth}
-            className="p-2 text-muted-foreground hover:text-vault-text hover:bg-vault-card rounded-xl transition active:scale-95"
-            title="Fit Page Width"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
         </div>
+      )}
+
+      {/* FLOATING CORNER PAGE NAVIGATION DOCK */}
+      {/* 1. Left Corner: Previous Page Button */}
+      <button
+        onClick={goToPrevPage}
+        disabled={currentPage <= 1 || renderingPage}
+        className="fixed bottom-20 md:bottom-6 left-3 sm:left-6 z-30 flex items-center gap-1.5 px-3 py-2 bg-vault-surface/90 hover:bg-vault-card backdrop-blur-xl border border-vault-border text-vault-text rounded-2xl shadow-xl transition active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+        title="Previous Page"
+      >
+        <ChevronLeft className="w-4 h-4 text-vault-primary" />
+        <span className="text-xs font-semibold hidden xs:inline">Prev</span>
+      </button>
+
+      {/* 2. Center: Page Indicator Pill */}
+      <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-3 py-1.5 bg-vault-surface/90 backdrop-blur-xl border border-vault-border rounded-2xl shadow-xl">
+        <span className="text-xs font-mono font-bold text-vault-text">
+          {currentPage} <span className="text-muted-foreground font-normal">/</span> {numPages}
+        </span>
+      </div>
+
+      {/* 3. Right Corner: Next Page Button */}
+      <button
+        onClick={goToNextPage}
+        disabled={currentPage >= numPages || renderingPage}
+        className="fixed bottom-20 md:bottom-6 right-3 sm:right-6 z-30 flex items-center gap-1.5 px-3 py-2 bg-vault-primary text-vault-bg font-bold rounded-2xl shadow-xl shadow-vault-primary/20 hover:brightness-110 transition active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+        title="Next Page"
+      >
+        <span className="text-xs font-bold hidden xs:inline">Next</span>
+        <ChevronRight className="w-4 h-4" />
+      </button>
+
+      {/* 4. Floating Zoom Controls (Positioned above Next Button) */}
+      <div className="fixed bottom-32 md:bottom-20 right-3 sm:right-6 z-30 flex items-center bg-vault-surface/95 backdrop-blur-xl border border-vault-border rounded-2xl shadow-2xl p-1 gap-1">
+        <button
+          onClick={() => handleZoomStep(-0.2)}
+          className="p-1.5 text-muted-foreground hover:text-vault-text hover:bg-vault-card rounded-xl transition active:scale-95"
+          title="Zoom Out"
+        >
+          <ZoomOut className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={handleFitToWidth}
+          className="px-2 py-1 text-[11px] font-mono font-bold text-vault-primary hover:bg-vault-card rounded-xl transition"
+          title="Fit to Screen Width"
+        >
+          {Math.round(scale * 100)}%
+        </button>
+
+        <button
+          onClick={() => handleZoomStep(0.2)}
+          className="p-1.5 text-muted-foreground hover:text-vault-text hover:bg-vault-card rounded-xl transition active:scale-95"
+          title="Zoom In"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+
+        <div className="w-[1px] h-4 bg-vault-border mx-0.5" />
+
+        <button
+          onClick={handleFitToWidth}
+          className="p-1.5 text-muted-foreground hover:text-vault-text hover:bg-vault-card rounded-xl transition active:scale-95"
+          title="Fit Page Width"
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
       </div>
 
       {/* MOBILE THUMB-FRIENDLY BOTTOM DOCK */}
