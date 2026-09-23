@@ -41,6 +41,9 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "NotesGO",
   },
+  verification: {
+    google: "2CHJBg-qKXDrhWRAOxOwL8bGxIXIq4R-QM6EGL9MMeM",
+  },
 };
 
 export const viewport: Viewport = {
@@ -61,6 +64,9 @@ export default function RootLayout({
       lang="en" 
       className={`dark ${sora.variable} ${inter.variable} ${jetbrainsMono.variable}`}
     >
+      <head>
+        <meta name="google-site-verification" content="2CHJBg-qKXDrhWRAOxOwL8bGxIXIq4R-QM6EGL9MMeM" />
+      </head>
       <body className="min-h-screen bg-vault-bg text-vault-text font-sans antialiased selection:bg-vault-primary/25 selection:text-vault-primary overflow-x-hidden">
         <PwaProvider>
           {children}
