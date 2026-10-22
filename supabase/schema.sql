@@ -158,6 +158,11 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('vault', 'vault', false)
 ON CONFLICT (id) DO NOTHING;
 
+-- NOTE FOR LARGE FILE UPLOADS (100MB+):
+-- Supabase Free Tier enforces a strict 50 MB global upload ceiling per file.
+-- If your project is upgraded to the Pro Plan, you can configure larger sizes (e.g. 500 MB) with:
+-- UPDATE storage.buckets SET file_size_limit = 524288000 WHERE id = 'vault';
+
 -- Storage RLS Policies: users can only access their own user_id directory
 CREATE POLICY "Users can upload their own vault files" ON storage.objects
     FOR INSERT TO authenticated WITH CHECK (
