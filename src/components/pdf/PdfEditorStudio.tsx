@@ -35,8 +35,10 @@ import {
   Move,
   CornerDownRight,
   ArrowRight,
-  Check
+  Check,
+  ExternalLink
 } from 'lucide-react';
+import { isGoogleDrivePath, getGoogleDriveId } from '@/lib/gdrive';
 
 interface PdfAnnotationStroke {
   id: string;
@@ -85,6 +87,7 @@ interface PdfEditorStudioProps {
   onClose: () => void;
   userId: string;
   onFileUpdated?: (updatedFile: FileItem) => void;
+  onSwitchToDriveViewer?: (file: FileItem) => void;
 }
 
 const PALETTE = [
@@ -105,6 +108,7 @@ export function PdfEditorStudio({
   onClose,
   userId,
   onFileUpdated,
+  onSwitchToDriveViewer,
 }: PdfEditorStudioProps) {
   const [pdfLibLoaded, setPdfLibLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -219,15 +223,28 @@ export function PdfEditorStudio({
 
     async function loadPdfAndAnnotations() {
       try {
-        // Download current PDF binary
-        const { data: fileBlob, error: downloadError } = await supabase.storage
-          .from('vault')
-          .download(file.storage_path);
+        // Download current PDF binary (from Google Drive proxy if gdrive, else Supabase)
+        let arrayBuffer: ArrayBuffer;
+        if (isGoogleDrivePath(file.storage_path)) {
+          const fileId = getGoogleDriveId(file.storage_path);
+          if (!fileId) throw new Error('Invalid Google Drive link or file ID');
+          const gdriveRes = await fetch(`/api/gdrive-pdf?fileId=${encodeURIComponent(fileId)}`);
+          if (!gdriveRes.ok) {
+            const errText = await gdriveRes.text().catch(() => '');
+            throw new Error(errText || `Failed to stream Google Drive PDF (${gdriveRes.status})`);
+          }
+          arrayBuffer = await gdriveRes.arrayBuffer();
+        } else {
+          const { data: fileBlob, error: downloadError } = await supabase.storage
+            .from('vault')
+            .download(file.storage_path);
 
-        if (downloadError) throw downloadError;
+          if (downloadError) throw downloadError;
+          arrayBuffer = await fileBlob.arrayBuffer();
+        }
+
         if (!isMounted) return;
 
-        const arrayBuffer = await fileBlob.arrayBuffer();
         cleanBasePdfBytesRef.current = arrayBuffer.slice(0);
         activePdfBytesRef.current = arrayBuffer.slice(0);
         const uint8Array = new Uint8Array(arrayBuffer);
@@ -1308,33 +1325,50 @@ export function PdfEditorStudio({
       const modifiedPdfBytes = await loadedPdf.save();
       const updatedBlob = new Blob([modifiedPdfBytes as unknown as BlobPart], { type: 'application/pdf' });
 
-      // 5. Overwrite file in Supabase Storage with cacheControl: 0
-      const { error: uploadErr } = await supabase.storage.from('vault').upload(file.storage_path, updatedBlob, {
-        cacheControl: '0',
-        upsert: true,
-      });
+      if (!isGoogleDrivePath(file.storage_path)) {
+        // 5. Overwrite file in Supabase Storage with cacheControl: 0
+        const { error: uploadErr } = await supabase.storage.from('vault').upload(file.storage_path, updatedBlob, {
+          cacheControl: '0',
+          upsert: true,
+        });
 
-      if (uploadErr) {
-        console.warn('Storage upload note:', uploadErr.message);
+        if (uploadErr) {
+          console.warn('Storage upload note:', uploadErr.message);
+        }
+
+        // 6. Update database record in public.files
+        try {
+          await supabase
+            .from('files')
+            .update({
+              size: updatedBlob.size,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', file.id);
+        } catch {}
+
+        // 7. Inform parent Vault dashboard of file update
+        onFileUpdated?.({
+          ...file,
+          size: updatedBlob.size,
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        // For Google Drive files: Vector annotations are safely saved in cloud storage & localStorage
+        try {
+          await supabase
+            .from('files')
+            .update({
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', file.id);
+        } catch {}
+
+        onFileUpdated?.({
+          ...file,
+          updated_at: new Date().toISOString(),
+        });
       }
-
-      // 6. Update database record in public.files
-      try {
-        await supabase
-          .from('files')
-          .update({
-            size: updatedBlob.size,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', file.id);
-      } catch {}
-
-      // 7. Inform parent Vault dashboard of file update
-      onFileUpdated?.({
-        ...file,
-        size: updatedBlob.size,
-        updated_at: new Date().toISOString(),
-      });
 
       activePdfBytesRef.current = modifiedPdfBytes.slice().buffer;
       setHasUnsavedChanges(false);
@@ -1430,9 +1464,16 @@ export function PdfEditorStudio({
           </button>
 
           <div className="min-w-0 flex flex-col justify-center">
-            <h2 className="font-heading font-semibold text-xs sm:text-sm text-vault-text truncate max-w-[120px] xs:max-w-[170px] sm:max-w-xs md:max-w-md">
-              {file.name}
-            </h2>
+            <div className="flex items-center gap-1.5">
+              {isGoogleDrivePath(file.storage_path) && (
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[9px] font-bold font-mono uppercase tracking-wider shrink-0">
+                  Drive PDF
+                </span>
+              )}
+              <h2 className="font-heading font-semibold text-xs sm:text-sm text-vault-text truncate max-w-[120px] xs:max-w-[170px] sm:max-w-xs md:max-w-md">
+                {file.name}
+              </h2>
+            </div>
             <div className="flex items-center gap-1.5 text-[10px] font-mono mt-0.5">
               {isSavingToFile ? (
                 <span className="text-vault-primary flex items-center gap-1 font-bold">
@@ -1520,6 +1561,21 @@ export function PdfEditorStudio({
               <Redo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </div>
+
+          {/* Switch to Drive Stream Viewer if Google Drive file */}
+          {isGoogleDrivePath(file.storage_path) && onSwitchToDriveViewer && (
+            <button
+              onClick={() => {
+                handleSafeClose();
+                onSwitchToDriveViewer(file);
+              }}
+              title="Open Google Drive Stream Viewer"
+              className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold rounded-xl border border-amber-500/30 transition shadow-sm"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Drive View</span>
+            </button>
+          )}
 
           {/* Direct Download Button (Desktop only) */}
           <button
@@ -1768,12 +1824,25 @@ export function PdfEditorStudio({
             <FileText className="w-12 h-12 text-destructive mx-auto mb-3" />
             <h3 className="font-heading font-semibold text-sm text-vault-text mb-1">Failed to Open PDF</h3>
             <p className="text-xs text-muted-foreground mb-4">{error}</p>
-            <button
-              onClick={handleSafeClose}
-              className="px-4 py-2 bg-vault-card hover:bg-vault-card/80 text-vault-text text-xs font-semibold rounded-xl border border-vault-border"
-            >
-              Return to Vault
-            </button>
+            <div className="flex items-center justify-center gap-2">
+              {isGoogleDrivePath(file.storage_path) && onSwitchToDriveViewer && (
+                <button
+                  onClick={() => {
+                    onClose();
+                    onSwitchToDriveViewer(file);
+                  }}
+                  className="px-4 py-2 bg-vault-primary hover:bg-vault-primary/90 text-vault-bg text-xs font-bold rounded-xl transition"
+                >
+                  Open in Drive Stream Viewer
+                </button>
+              )}
+              <button
+                onClick={handleSafeClose}
+                className="px-4 py-2 bg-vault-card hover:bg-vault-card/80 text-vault-text text-xs font-semibold rounded-xl border border-vault-border transition"
+              >
+                Return to Vault
+              </button>
+            </div>
           </div>
         ) : (
           /* Stage Centering Container: min-w-full and min-h-full inline-flex centers when smaller, allows full 2D scroll when larger with NO clipping! */

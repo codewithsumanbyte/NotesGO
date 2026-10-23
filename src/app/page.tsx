@@ -16,7 +16,9 @@ import { EditFolderModal } from '@/components/vault/EditFolderModal';
 import { NoteEditorModal } from '@/components/notes/NoteEditorModal';
 import { WhiteboardModal } from '@/components/whiteboard/WhiteboardModal';
 import { PdfEditorStudio } from '@/components/pdf/PdfEditorStudio';
+import { GoogleDrivePdfViewer } from '@/components/pdf/GoogleDrivePdfViewer';
 import { AuthModal } from '@/components/auth/AuthModal';
+import { isGoogleDrivePath, getGoogleDriveDownloadUrl } from '@/lib/gdrive';
 import { 
   Folder, 
   FileItem, 
@@ -65,6 +67,7 @@ export default function Home() {
   const [isEditFolderOpen, setIsEditFolderOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [activePdfFile, setActivePdfFile] = useState<FileItem | null>(null);
+  const [activeGdriveFile, setActiveGdriveFile] = useState<FileItem | null>(null);
   const [activeNote, setActiveNote] = useState<NoteItem | null>(null);
   const [isNoteEditorOpen, setIsNoteEditorOpen] = useState(false);
   const [activeWhiteboard, setActiveWhiteboard] = useState<WhiteboardItem | null>(null);
@@ -206,10 +209,10 @@ export default function Home() {
     }
   };
 
-  // Open file handler (PDFs open in dedicated full-screen PDF Editor Studio!)
+  // Open file handler (PDFs and Google Drive PDFs open in dedicated full-screen PDF Editor Studio with pen, highlighter, and eraser tools!)
   const handleOpenFile = (file: FileItem) => {
     const category = getFileCategory(file.mime_type, file.name);
-    if (category === 'pdf') {
+    if (category === 'pdf' || isGoogleDrivePath(file.storage_path)) {
       setActivePdfFile(file);
     } else {
       setPreviewFile(file);
@@ -221,7 +224,9 @@ export default function Home() {
     if (activeTab === 'trash') {
       const file = files.find((f) => f.id === fileId);
       if (file) {
-        await supabase.storage.from('vault').remove([file.storage_path]);
+        if (!isGoogleDrivePath(file.storage_path)) {
+          await supabase.storage.from('vault').remove([file.storage_path]);
+        }
         await supabase.from('files').delete().eq('id', fileId);
       }
     } else {
@@ -303,6 +308,11 @@ export default function Home() {
 
   // Direct download file (with cache-busting so newest baked edits are always fetched)
   const handleDownloadFile = async (file: FileItem) => {
+    if (isGoogleDrivePath(file.storage_path)) {
+      const downloadUrl = getGoogleDriveDownloadUrl(file.storage_path);
+      window.open(downloadUrl, '_blank');
+      return;
+    }
     const { data } = await supabase.storage.from('vault').createSignedUrl(file.storage_path, 60);
     if (data?.signedUrl) {
       const downloadUrl = `${data.signedUrl}&t=${Date.now()}`;
@@ -711,6 +721,26 @@ export default function Home() {
           onFileUpdated={(updated) => {
             setActivePdfFile(updated);
             setFiles((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+          }}
+          onSwitchToDriveViewer={(file) => {
+            setActivePdfFile(null);
+            setActiveGdriveFile(file);
+          }}
+        />
+      )}
+
+      {/* Dedicated Full-Screen Native Google Drive PDF Viewer */}
+      {activeGdriveFile && (
+        <GoogleDrivePdfViewer
+          file={activeGdriveFile}
+          isOpen={!!activeGdriveFile}
+          onClose={() => {
+            setActiveGdriveFile(null);
+            loadVaultData();
+          }}
+          onOpenInStudio={(file) => {
+            setActiveGdriveFile(null);
+            setActivePdfFile(file);
           }}
         />
       )}

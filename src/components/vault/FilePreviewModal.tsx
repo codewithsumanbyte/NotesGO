@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { FileItem } from '@/types/database';
 import { formatBytes, formatDate, getFileCategory } from '@/lib/utils';
+import { isGoogleDrivePath, getGoogleDrivePreviewUrl, getGoogleDriveDownloadUrl } from '@/lib/gdrive';
 
 interface FilePreviewModalProps {
   file: FileItem | null;
@@ -56,6 +57,15 @@ export function FilePreviewModal({
 
     async function loadFile() {
       try {
+        if (isGoogleDrivePath(file!.storage_path)) {
+          const preview = getGoogleDrivePreviewUrl(file!.storage_path);
+          if (isMounted) {
+            setFileUrl(preview);
+            setLoading(false);
+          }
+          return;
+        }
+
         const { data, error } = await supabase.storage
           .from('vault')
           .createSignedUrl(file!.storage_path, 3600);
@@ -110,7 +120,12 @@ export function FilePreviewModal({
             <div className="min-w-0">
               <h3 className="text-xs sm:text-sm font-semibold text-vault-text truncate">{file.name}</h3>
               <p className="text-[10px] text-muted-foreground font-mono">
-                {formatBytes(file.size)} • {formatDate(file.created_at)}
+                {isGoogleDrivePath(file.storage_path) ? (
+                  <span className="text-amber-400 font-semibold">Google Drive Cloud PDF</span>
+                ) : (
+                  <span>{formatBytes(file.size)}</span>
+                )}{' '}
+                • {formatDate(file.created_at)}
               </p>
             </div>
           </div>
@@ -171,7 +186,7 @@ export function FilePreviewModal({
 
             {fileUrl && (
               <a
-                href={fileUrl}
+                href={isGoogleDrivePath(file.storage_path) ? getGoogleDriveDownloadUrl(file.storage_path) : fileUrl}
                 download={file.name}
                 target="_blank"
                 rel="noreferrer"
@@ -263,9 +278,10 @@ export function FilePreviewModal({
                 </div>
               )}
               <iframe
-                src={`${fileUrl}#toolbar=1&navpanes=1`}
+                src={isGoogleDrivePath(file.storage_path) ? fileUrl : `${fileUrl}#toolbar=1&navpanes=1`}
                 className="w-full flex-1 rounded-b-xl border-none bg-white"
                 title={file.name}
+                allow="autoplay; fullscreen"
               />
             </div>
           ) : (category === 'code' || category === 'text') && textContent !== null ? (

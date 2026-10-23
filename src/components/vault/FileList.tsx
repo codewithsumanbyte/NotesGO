@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { FileItem } from '@/types/database';
 import { formatBytes, getFileCategory } from '@/lib/utils';
+import { isGoogleDrivePath } from '@/lib/gdrive';
 
 interface FileListProps {
   files: FileItem[];
@@ -32,7 +33,10 @@ export function FileList({
   onToggleFavorite,
   onDownloadFile,
 }: FileListProps) {
-  const getCategoryIcon = (category: string) => {
+  const getCategoryIcon = (category: string, isGdrive: boolean) => {
+    if (isGdrive) {
+      return <FileText className="w-4 h-4 text-amber-400" />;
+    }
     switch (category) {
       case 'pdf': return <FileText className="w-4 h-4 text-rose-400" />;
       case 'image': return <ImageIcon className="w-4 h-4 text-purple-300" />;
@@ -57,6 +61,7 @@ export function FileList({
 
       <div className="divide-y divide-vault-border/50">
         {files.map((file) => {
+          const isGdrive = isGoogleDrivePath(file.storage_path);
           const category = getFileCategory(file.mime_type, file.name);
 
           return (
@@ -75,18 +80,25 @@ export function FileList({
                 >
                   <Star className={`w-3.5 h-3.5 ${file.is_favorite ? 'text-amber-400 fill-amber-400' : ''}`} />
                 </button>
-                <div className="shrink-0">{getCategoryIcon(category)}</div>
-                <span className="font-medium text-vault-text truncate group-hover:text-vault-primary transition-colors">
-                  {file.name}
-                </span>
+                <div className="shrink-0">{getCategoryIcon(category, isGdrive)}</div>
+                <div className="flex items-center gap-1.5 min-w-0 truncate">
+                  <span className="font-medium text-vault-text truncate group-hover:text-vault-primary transition-colors">
+                    {file.name}
+                  </span>
+                  {isGdrive && (
+                    <span className="shrink-0 text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25">
+                      GDRIVE
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="hidden sm:block col-span-2 uppercase font-mono text-[10px] text-muted-foreground">
-                {category}
+                {isGdrive ? 'Cloud PDF' : category}
               </div>
 
               <div className="col-span-3 sm:col-span-2 text-muted-foreground font-mono text-[11px]">
-                {formatBytes(file.size)}
+                {isGdrive ? <span className="text-amber-400 font-semibold">Google Drive</span> : formatBytes(file.size)}
               </div>
 
               <div className="col-span-2 flex items-center justify-end gap-1">

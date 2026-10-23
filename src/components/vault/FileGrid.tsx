@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { FileItem } from '@/types/database';
 import { formatBytes, getFileCategory } from '@/lib/utils';
+import { isGoogleDrivePath } from '@/lib/gdrive';
 
 interface FileGridProps {
   files: FileItem[];
@@ -36,7 +37,10 @@ export function FileGrid({
 }: FileGridProps) {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
-  const getCategoryTheme = (category: string) => {
+  const getCategoryTheme = (category: string, isGdrive: boolean) => {
+    if (isGdrive) {
+      return { icon: FileText, bg: 'bg-amber-500/15', text: 'text-amber-400', badge: 'GDRIVE' };
+    }
     switch (category) {
       case 'pdf':
         return { icon: FileText, bg: 'bg-rose-500/15', text: 'text-rose-400', badge: 'PDF' };
@@ -68,8 +72,9 @@ export function FileGrid({
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4">
         {files.map((file) => {
+          const isGdrive = isGoogleDrivePath(file.storage_path);
           const category = getFileCategory(file.mime_type, file.name);
-          const theme = getCategoryTheme(category);
+          const theme = getCategoryTheme(category, isGdrive);
           const Icon = theme.icon;
           const isMenuOpen = activeMenuId === file.id;
 
@@ -175,8 +180,12 @@ export function FileGrid({
                 >
                   {file.name}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
-                  {formatBytes(file.size)}
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono flex items-center gap-1">
+                  {isGdrive ? (
+                    <span className="text-amber-400 font-semibold">Google Drive</span>
+                  ) : (
+                    <span>{formatBytes(file.size)}</span>
+                  )}
                 </p>
               </div>
 
